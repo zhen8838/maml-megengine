@@ -1,10 +1,10 @@
 import megengine as meg
 import megengine.module as M
 import megengine.functional as F
-import initializer as init
+import initializers as init
 import megengine.module.init as minit
-import layer as kl
-import function as kf
+import layers as kl
+import functions as kf
 
 
 def fc_init_(module: M.Linear):
@@ -189,7 +189,7 @@ class OmniglotCNN(M.Module):
   """
 
   def __init__(self, output_size=5, hidden_size=64, layers=4):
-    super(OmniglotCNN, self).__init__()
+    super().__init__()
     self.hidden_size = hidden_size
     self.base = ConvBase(output_size=hidden_size,
                          hidden=hidden_size,

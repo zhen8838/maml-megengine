@@ -1,1 +1,1 @@
-from .metalearn import *
+from .metalearn import OmniglotCNN, OmniglotFC

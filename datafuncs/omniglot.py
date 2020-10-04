@@ -1,16 +1,17 @@
 import megengine as meg
 from numpy.core.numeric import outer
 import megengine.data.dataset as mds
+from megengine.data.transform import Transform
 from pathlib import Path
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 import numpy as np
 import cv2
 
 
 class OmniglotDataset(mds.Dataset):
-  def __init__(self, root: Path, nway: int, kshot: int, kquery: int, mode: str = 'Train') -> None:
+  def __init__(self, root: Path, nway: int, kshot: int, kquery: int, mode: str = 'train', out_size=(28, 28), out_format: Optional[str] = 'fc') -> None:
     super().__init__()
-    if mode == 'Train':
+    if mode.lower() == 'train':
       self.root = root / 'images_background'
     else:
       self.root = root / 'images_evaluation'
@@ -20,7 +21,9 @@ class OmniglotDataset(mds.Dataset):
     self.kquery = kquery
     self.char_fold, self.image_list = self.get_char_fold(self.root, shuffle=True)
     self.char_fold_idx = np.arange(len(self.char_fold))
-    self.vread_image = np.vectorize(lambda path: cv2.imread(path, cv2.IMREAD_COLOR), ['uint8'])
+    self.out_size = out_size
+    self.im_process = {'fc': self.im_process_fc,
+                       'cnn': self.im_process_cnn}[out_format]
 
   def get_char_fold(self, root: Path, shuffle: bool = True) -> Tuple[np.ndarray, np.ndarray]:
     """get all omniglot sub sub dir, eg. 
@@ -55,7 +58,7 @@ class OmniglotDataset(mds.Dataset):
                                              np.ndarray, np.ndarray]:
     image_paths, labels = self.sample_image_path_label(index)
     images = self.read_image_path(image_paths)
-    labels = self.to_categorical(labels)
+    # labels = self.to_categorical(labels)
     return self.split_support_query(images, labels)
 
   def __len__(self) -> int:
@@ -83,6 +86,25 @@ class OmniglotDataset(mds.Dataset):
           np.ones([self.kshot + self.kquery], dtype='int32') * label)
     return np.array(out_images), np.array(out_labels)
 
+  def im_resize(self, x):
+    return cv2.resize(x, self.out_size).astype('float32')
+
+  def im_read(self, x):
+    return np.expand_dims(cv2.imread(x, cv2.IMREAD_GRAYSCALE), -1)
+
+  def im_norm(self, x, mean=127.5, std=127.5):
+    return (x - mean) / std
+
+  def im_trans(self, x):
+    return np.ascontiguousarray(np.rollaxis(x, 2, start=0))
+
+  def im_process_cnn(self, x: np.ndarray):
+    return self.im_trans(self.im_norm(
+        np.expand_dims(self.im_resize(x), -1)))
+
+  def im_process_fc(self, x: np.ndarray):
+    return np.ravel(self.im_norm(self.im_resize(x), -1))
+
   def read_image_path(self, image_paths: np.ndarray) -> np.ndarray:
     """read image paths
 
@@ -92,8 +114,8 @@ class OmniglotDataset(mds.Dataset):
     Returns:
         np.ndarray: image_paths,labels
     """
-    def read(x): return cv2.imread(x, cv2.IMREAD_COLOR)
-    images = [[im for im in map(read, nway)] for nway in image_paths]
+
+    images = [[self.im_process(im) for im in map(self.im_read, nway)] for nway in image_paths]
     return np.array(images)
 
   def to_categorical(self, labels: np.ndarray) -> np.ndarray:
@@ -105,7 +127,7 @@ class OmniglotDataset(mds.Dataset):
     Returns:
         np.ndarray: [nway,kshot+kquery,nway]
     """
-    return np.eye(self.nway)[labels]
+    return np.eye(self.nway, dtype='float32')[labels]
 
   def split_support_query(self, images: np.ndarray,
                           labels: np.ndarray
