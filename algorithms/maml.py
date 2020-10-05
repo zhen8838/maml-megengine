@@ -54,7 +54,7 @@ def replace_parameter(module_table: Dict[str, M.Module],
                       named_updates: Dict[str, meg.Parameter]):
   for key, value in named_updates.items():
     module_name, param_name = key.rsplit('.', 1)
-    exec(f"module_table['{module_name}'].{param_name}=value")
+    exec(f"module_table['{module_name}'].{param_name}.set_value(value)")
 
 
 class MAML(object):

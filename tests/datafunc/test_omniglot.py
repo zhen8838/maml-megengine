@@ -166,7 +166,7 @@ def replace_parameter(module_table,
                       named_updates):
   for key, value in named_updates.items():
     module_name, param_name = key.rsplit('.', 1)
-    exec(f"module_table['{module_name}'].{param_name}=value")
+    exec(f"module_table['{module_name}'].{param_name}.set_value(value)")
 
 
 def test_grad_twice():
@@ -203,6 +203,3 @@ def test_grad_twice():
   replace_parameter(named_module, named_param)
   optimizer.backward(loss2)
   optimizer.step()
-
-
-test_grad_twice()
