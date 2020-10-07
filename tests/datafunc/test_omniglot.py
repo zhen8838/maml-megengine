@@ -16,8 +16,9 @@ from megengine.data.dataloader import DataLoader
 from models import OmniglotFC, OmniglotCNN
 import megengine as meg
 import megengine.optimizer as optim
-from typing import List
+from typing import List, Dict, Tuple
 from algorithms import MAML
+from megengine.jit import trace
 
 
 def build_dataset(root=Path('/home/zqh/data/omniglot-py'),
@@ -203,3 +204,106 @@ def test_grad_twice():
   replace_parameter(named_module, named_param)
   optimizer.backward(loss2)
   optimizer.step()
+
+
+class CustomModel(M.Module):
+  def __init__(self) -> None:
+    super().__init__()
+    self.l1 = M.Linear(10, 20)
+    self.l2 = M.Linear(20, 10)
+    self.l3 = M.Linear(10, 5)
+
+  def forward(self, x, weights: Dict[str, meg.Tensor] = None):
+    x = self.l1._calc_linear(x, weights['l1.weight'],
+                             weights['l1.bias'])
+    x = self.l2._calc_linear(x, weights['l2.weight'],
+                             weights['l2.bias'])
+    x = self.l3._calc_linear(x, weights['l3.weight'],
+                             weights['l3.bias'])
+    return x
+
+
+@trace
+def train_func(x1, y1, x2, y2, *, loss_fn, opt, net, keys, params):
+  # 此处data和label不再需要先创建tensor然后通过set_value赋值，这些操作在trace内部完成
+  logits = net(x1, weights=dict(zip(keys, params)))
+  loss = loss_fn(logits, y1)
+  grads = F.grad(loss, params, use_virtual_grad=False)
+  fast_weights = [p - 0.5 * g for g, p in zip(grads, params)]
+
+  # forward twice
+  loss2 = loss_fn(net(x2, weights=dict(zip(keys, fast_weights))), y2)
+  opt.backward(loss2)
+
+
+def test_grad_twice_method_2():
+  # model define
+  model = CustomModel()
+  model.train()
+  named_param = dict(list(model.named_parameters(requires_grad=True)))
+  name_keys = list(named_param.keys())
+  params = list(named_param.values())
+
+  loss_fn = F.cross_entropy_with_softmax
+  optimizer = optim.SGD(params, lr=0.003)
+
+  # forward once
+  optimizer.zero_grad()
+  x1 = meg.tensor(np.random.randn(5, 10), dtype='float32')
+  y1 = meg.tensor(np.random.randint(0, 5, (5)), dtype='int32')
+  x2 = meg.tensor(np.random.randn(5, 10), dtype='float32')
+  y2 = meg.tensor(np.random.randint(0, 5, (5)), dtype='int32')
+
+  train_func(x1, y1, x2, y2, loss_fn=loss_fn, opt=optimizer,
+             net=model, keys=name_keys, params=params)
+  optimizer.step()
+
+
+class CustomModel3(M.Module):
+  def __init__(self) -> None:
+    super().__init__()
+    self.l1 = M.Linear(10, 20)
+    self.l2 = M.Linear(20, 10)
+    self.l3 = M.Linear(10, 5)
+
+  def forward(self, x, weights: Dict[str, meg.Tensor] = None):
+    x = self.l1._calc_linear(x, weights[1], weights[0])
+    x = self.l2._calc_linear(x, weights[3], weights[2])
+    x = self.l3._calc_linear(x, weights[5], weights[4])
+    return x
+
+
+@trace
+def train_func3(x1, y1, x2, y2, *, loss_fn, opt, net, params):
+  loss = loss_fn(net(x1, weights=params), y1)
+  grads = F.grad(loss, params, use_virtual_grad=False)
+  fast_weights = [p - 0.5 * g for g, p in zip(grads, params)]
+  # forward twice
+  loss2 = loss_fn(net(x2, weights=fast_weights), y2)
+  opt.backward(loss2)
+
+
+def test_grad_twice_method_3():
+  # model define
+  model = CustomModel3()
+  model.train()
+  named_param = dict(list(model.named_parameters(requires_grad=True)))
+  params = list(named_param.values())
+  external_params = [meg.Parameter(np.random.normal(size=p.shape), dtype='float32') for p in params]
+
+  loss_fn = F.cross_entropy_with_softmax
+  optimizer = optim.SGD(external_params, lr=0.003)
+
+  # forward once
+  optimizer.zero_grad()
+  x1 = meg.tensor(np.random.randn(5, 10), dtype='float32')
+  y1 = meg.tensor(np.random.randint(0, 5, (5)), dtype='int32')
+  x2 = meg.tensor(np.random.randn(5, 10), dtype='float32')
+  y2 = meg.tensor(np.random.randint(0, 5, (5)), dtype='int32')
+
+  train_func3(x1, y1, x2, y2, loss_fn=loss_fn, opt=optimizer,
+              net=model, params=external_params)
+  optimizer.step()
+
+
+test_grad_twice_method_3()
